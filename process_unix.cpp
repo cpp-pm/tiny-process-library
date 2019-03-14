@@ -189,7 +189,7 @@ void Process::async_read() noexcept {
   {
     auto buffer = std::unique_ptr<char[]>( new char[buffer_size] );
 
-    struct pollfd fds[2] = { 0 };
+    struct pollfd fds[2];
     auto stderr_fd_p = stderr_fd.get();
     auto stdout_fd_p = stdout_fd.get();
     fds[0].fd = (stderr_fd_p) ? *stderr_fd_p : -1;
