@@ -3,6 +3,9 @@
 #include <signal.h>
 #include <stdexcept>
 #include <unistd.h>
+#include <errno.h>
+#include <poll.h>
+#include <fcntl.h>
 
 namespace TinyProcessLib {
 
@@ -178,25 +181,99 @@ Process::id_type Process::open(const std::string &command, const std::string &pa
 }
 
 void Process::async_read() noexcept {
-  if(data.id <= 0)
+  if(data.id<=0)
     return;
 
-  if(stdout_fd) {
-    stdout_thread = std::thread([this]() {
-      auto buffer = std::unique_ptr<char[]>(new char[buffer_size]);
-      ssize_t n;
-      while((n = read(*stdout_fd, buffer.get(), buffer_size)) > 0)
-        read_stdout(buffer.get(), static_cast<size_t>(n));
-    });
-  }
-  if(stderr_fd) {
-    stderr_thread = std::thread([this]() {
-      auto buffer = std::unique_ptr<char[]>(new char[buffer_size]);
-      ssize_t n;
-      while((n = read(*stderr_fd, buffer.get(), buffer_size)) > 0)
-        read_stderr(buffer.get(), static_cast<size_t>(n));
-    });
-  }
+  // combined non-blocking stderr/stdout reading
+  stdout_thread=std::thread([this]()
+  {
+    auto buffer = std::unique_ptr<char[]>( new char[buffer_size] );
+
+    struct pollfd fds[2] = { 0 };
+    auto stderr_fd_p = stderr_fd.get();
+    auto stdout_fd_p = stdout_fd.get();
+    fds[0].fd = (stderr_fd_p) ? *stderr_fd_p : -1;
+    fds[1].fd = (stdout_fd_p) ? *stdout_fd_p : -1;
+    fds[0].events = POLLIN;
+    fds[1].events = POLLIN;
+
+    // make FDs non-blocking
+    unsigned fd_count = 0;
+    for (unsigned i = 0; i < sizeof(fds) / sizeof(*fds); ++i)
+    {
+      const auto fd = fds[i].fd;
+      if (fd < 0)
+        continue;
+
+      if (fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) < 0)
+      {
+        // F_SETFL or F_GETFL do not yield EINTR, we declare this FD dead
+        fds[i].fd = -1;
+      }
+      else
+      {
+        ++fd_count;
+      }
+    }
+
+    // while we have at least one good FD to read from
+    while (fd_count > 0)
+    {
+      errno = 0;
+      const int count = poll(fds, sizeof(fds) / sizeof(*fds), -1);
+      if (count >= 0)
+      {
+        for (unsigned i = 0; i < sizeof(fds) / sizeof(*fds); ++i)
+        {
+          const auto revents = fds[i].revents;
+          if (revents & POLLIN)
+          {
+            // perform read
+            auto buf = buffer.get();
+            errno = 0;
+            const ssize_t bytes_read = read(fds[i].fd, buf, buffer_size);
+            if (bytes_read > 0)
+            {
+              switch (i)
+              {
+                case 0:
+                  read_stderr(buf, static_cast<size_t>(bytes_read));
+                  break;
+                case 1:
+                  read_stdout(buf, static_cast<size_t>(bytes_read));
+                  break;
+                default:
+                  break;
+              }
+            }
+            else if (bytes_read < 0)
+            {
+              if (errno != EINTR && errno != EAGAIN)
+              {
+                // FD closed
+                fds[i].fd = -1;
+                --fd_count;
+              }
+            }
+          }
+          else if (revents & (POLLHUP | POLLNVAL | POLLERR))
+          {
+            // FD closed
+            fds[i].fd = -1;
+            --fd_count;
+          }
+        }
+      }
+      else
+      {
+        if (errno != EAGAIN && errno != EINTR)
+        {
+          // error occurred, terminate
+          break;
+        }
+      }
+    }
+  });
 }
 
 int Process::get_exit_status() noexcept {
