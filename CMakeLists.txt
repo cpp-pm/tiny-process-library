@@ -5,7 +5,7 @@ project(tiny-process-library VERSION 2.0.2)
 add_library(tiny-process-library process.cpp)
 
 if(MSVC)
-  target_compile_definitions(tiny-process-library PIRVATE _CRT_SECURE_NO_WARNINGS)
+  target_compile_definitions(tiny-process-library PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
 if(WIN32)
