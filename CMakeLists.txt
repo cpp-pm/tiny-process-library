@@ -2,13 +2,11 @@ cmake_minimum_required(VERSION 3.2)
 
 project(tiny-process-library VERSION 2.0.2)
 
-if(MSVC)
-  add_definitions(/D_CRT_SECURE_NO_WARNINGS)
-else()
-  add_compile_options(-std=c++11 -Wall -Wextra)
-endif()
-
 add_library(tiny-process-library process.cpp)
+
+if(MSVC)
+  target_compile_definitions(tiny-process-library PIRVATE _CRT_SECURE_NO_WARNINGS)
+endif()
 
 if(WIN32)
   target_sources(tiny-process-library PRIVATE process_win.cpp)
@@ -22,8 +20,12 @@ endif()
 
 find_package(Threads REQUIRED)
 
-target_link_libraries(tiny-process-library ${CMAKE_THREAD_LIBS_INIT})
-target_include_directories(tiny-process-library PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(tiny-process-library PUBLIC ${CMAKE_THREAD_LIBS_INIT})
+target_include_directories(tiny-process-library
+  PUBLIC
+  $<INSTALL_INTERFACE:include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+)
 
 # Introduce variables:
 # * CMAKE_INSTALL_LIBDIR
@@ -38,7 +40,12 @@ set(project_config "${generated_dir}/${PROJECT_NAME}Config.cmake")
 set(TARGETS_EXPORT_NAME "${PROJECT_NAME}Targets")
 set(namespace "${PROJECT_NAME}::")
 
-install(TARGETS tiny-process-library EXPORT "${TARGETS_EXPORT_NAME}" DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(TARGETS tiny-process-library
+  EXPORT "${TARGETS_EXPORT_NAME}"
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
 install(FILES process.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 include(CMakePackageConfigHelpers)
